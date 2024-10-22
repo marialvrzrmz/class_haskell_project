@@ -32,11 +32,11 @@ type Var = String
 data Type = TypeI | TypeB
     deriving Show
 
-data Op = Add | Sub | Mul | Div | GEq
+data Op = Add | Sub | Mul | Div | GEq | And | Or | Not
     deriving Show
 
 data Expr = Value Val | BinExpr Expr Op Expr | IfElse Expr Expr Expr | Func Var Type Expr --expr is the body of the function
-        | App Expr Expr | Ref Var
+        | App Expr Expr | Ref Var | UnExpr Op Expr        -- for unary operations like not
     deriving Show
 
 data Val = ValI Int | ValB Bool | ValE String
@@ -107,26 +107,47 @@ evaluateOp i1 GEq i2 = ValB (i1 >= i2)
 
 evaluate :: Expr -> Env -> Val
 evaluate (Value v) _ = v
-evaluate (IfElse c e1 e2) env = case evaluate c env of
-                                ValB True -> evaluate e1 env
-                                ValB False -> evaluate e2 env
-                                ValI 0 -> evaluate e2 env
-                                ValI _ -> evaluate e1 env
-                                --ValI i -> error "condition should be a boolean expression"
-evaluate (BinExpr e1 op e2) env = case (evaluate e1 env, evaluate e2 env) of
-                                (ValI i1, ValI i2) -> evaluateOp i1 op i2
-                                _ -> ValE "operands should be integer"
-evaluate (Ref x) env = case lookup x env of
-                        Nothing -> ValE "Variable not in scope"
-                        Just v -> v
-evaluate (App (Func x t e) e2) env = case (evaluate e2 env, t)of 
-                                    (ValI vi, TypeI) -> evaluate e ((x, ValI vi) : env)
-                                    (ValB vb, TypeB) -> evaluate e ((x, ValB vb) : env)
-                                    (ValI _, TypeB) -> ValE $ "Type mismatch for" ++ x
-                                    (ValB _, TypeI) -> ValE $ "Type mismatch for" ++ x
-                                    (ValE s, _) -> ValE s
 
-evaluate _ env = ValE "undefined" --Func or App e1 e2 where e1 is not a function
+-- Evaluate binary operations like and, or, and arithmetic
+evaluate (BinExpr e1 op e2) env = case (evaluate e1 env, evaluate e2 env) of
+    (ValB b1, ValB b2) -> case op of
+        And -> ValB (b1 && b2)
+        Or  -> ValB (b1 || b2)
+        _   -> ValE "Invalid boolean operation"
+    (ValI i1, ValI i2) -> case op of
+        Add -> evaluateOp i1 Add i2
+        Sub -> evaluateOp i1 Sub i2
+        Mul -> evaluateOp i1 Mul i2
+        Div -> evaluateOp i1 Div i2
+        GEq -> ValB (i1 >= i2)
+        _   -> ValE "Operands should be integer"
+    _ -> ValE "Type mismatch in binary expression"
+
+-- Evaluate unary operations like not
+evaluate (UnExpr Not e) env = case evaluate e env of  
+    ValB b -> ValB (not b) --negates the boolean values
+    _ -> ValE "Not operation requires a boolean expression"
+
+-- Other cases (e.g., IfElse, Ref, Func, App, etc.) remain unchanged
+evaluate (IfElse c e1 e2) env = case evaluate c env of
+    ValB True  -> evaluate e1 env
+    ValB False -> evaluate e2 env
+    ValI 0     -> evaluate e2 env
+    ValI _     -> evaluate e1 env
+    _ -> ValE "Condition should be a boolean expression"
+    
+evaluate (Ref x) env = case lookup x env of
+    Nothing -> ValE "Variable not in scope"
+    Just v  -> v
+
+evaluate (App (Func x t e) e2) env = case (evaluate e2 env, t) of 
+    (ValI vi, TypeI) -> evaluate e ((x, ValI vi) : env)
+    (ValB vb, TypeB) -> evaluate e ((x, ValB vb) : env)
+    (ValI _, TypeB) -> ValE $ "Type mismatch for" ++ x
+    (ValB _, TypeI) -> ValE $ "Type mismatch for" ++ x
+    (ValE s, _) -> ValE s
+
+evaluate _ _ = ValE "undefined"
 
 precedence :: Op -> Int
 precedence Add = 0
@@ -134,18 +155,43 @@ precedence Sub = 0
 precedence Mul = 1
 precedence Div = 1
 
+main :: IO ()
+main = do
+    let env = [("x", ValI 5), ("y", ValB True)]
+    
+    -- Test 'and' (True && False -> False)
+    let andTest = BinExpr (Value (ValB True)) And (Value (ValB False))
+    print (evaluate andTest env) -- Output: ValB False
 
--- Example of a while loop: while x > 0 do x = x - 1 end
-stmtWhile:: Stmt
-stmtWhile = While (BinExpr (Ref "x") GEq (Value (ValI 0)))
-                  (Seq (Assign "x" TypeI (BinExpr (Ref "x") Sub (Value (ValI 1)))) 
-                       (End (Assign "y" TypeI (Value (ValI 42)))))
+    -- Test 'or' (True || False -> True)
+    let orTest = BinExpr (Value (ValB True)) Or (Value (ValB False))
+    print (evaluate orTest env) -- Output: ValB True
 
--- Example of a for loop: for i = 1 to 5 do x = x + i end
-stmtFor :: Stmt
-stmtFor = For "i" (Value (ValI 1)) (Value (ValI 5)) 
-               (End (Assign "x" TypeI (BinExpr (Ref "x") Add (Ref "i"))))
+    -- Test 'not' (not True -> False)
+    let notTest = UnExpr Not (Value (ValB True))
+    print (evaluate notTest env) -- Output: ValB False
 
--- Example program using both loops
-exampleProgram :: Program
-exampleProgram = BeginEnd (Seq stmtFor (End stmtWhile))
+    -- Test combined expressions
+    let combinedTest = BinExpr (UnExpr Not (Value (ValB False))) And (Value (ValB True))
+    print (evaluate combinedTest env) -- Output: ValB True
+    -- Initialize the environment with variable 'x' set to 0
+    let env = [("x", ValI 0)]
+    
+    -- Example of testing the for loop
+    let forTest = For "i" (Value (ValI 1)) (Value (ValI 5)) 
+                   (End (Assign "x" TypeI (BinExpr (Ref "x") Add (Ref "i"))))
+    
+    -- Example of testing the while loop
+    let whileTest = While (BinExpr (Ref "x") GEq (Value (ValI 0)))
+                          (Seq (Assign "x" TypeI (BinExpr (Ref "x") Sub (Value (ValI 1)))) 
+                               (End (Assign "y" TypeI (Value (ValI 42)))))
+    
+    -- Running both loops
+    let resultFor = evaluateS forTest env
+    let resultWhile = evaluateS whileTest env
+    
+    -- Print the results
+    putStrLn "For loop result:"
+    print resultFor
+    putStrLn "\nWhile loop result:"
+    print resultWhile
