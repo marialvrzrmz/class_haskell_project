@@ -1,5 +1,5 @@
 module Evaluator where
-import 
+import Syntax
 import Examples
 import System.IO.Unsafe
 
