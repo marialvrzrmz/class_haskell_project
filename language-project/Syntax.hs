@@ -37,7 +37,7 @@ type Var = String
 data Type = TypeI | TypeB
     --deriving Show
 
-data Op = Add | Sub | Mul | Div | GEq
+data Op = Add | Sub | Mul | Div | GEq | And | Or | Not
     --deriving Show
 
 data Expr = Value Val | BinExpr Expr Op Expr | IfElse Expr Expr Expr | Func Var Type Expr -- expr is the body of the fun

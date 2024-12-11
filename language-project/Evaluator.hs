@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -Wno-overlapping-patterns #-}
 module Evaluator where
 import Syntax
 import Examples
@@ -56,10 +57,18 @@ evaluate (IfElse c e1 e2) env = case evaluate c env of
                                 ValE s -> ValE s
                                 --ValI i -> error "condition should be a boolean expression"
 evaluate (BinExpr e1 op e2) env = case (evaluate e1 env, evaluate e2 env) of
-                                (ValI i1, ValI i2) -> evaluateOp i1 op i2
-                                (ValE em1, _) -> ValE em1
-                                (_, ValE em2) -> ValE em2
-                                _ -> ValE "operands should be integer"
+    (ValB b1, ValB b2) -> case op of
+        And -> ValB (b1 && b2)
+        Or  -> ValB (b1 || b2)
+        _   -> ValE "Invalid boolean operation"
+    (ValI i1, ValI i2) -> case op of
+        Add -> evaluateOp i1 Add i2
+        Sub -> evaluateOp i1 Sub i2
+        Mul -> evaluateOp i1 Mul i2
+        Div -> evaluateOp i1 Div i2
+        GEq -> ValB (i1 >= i2)
+        _   -> ValE "Operands should be integer"
+    _ -> ValE "Type mismatch in binary expression"
 evaluate (Ref x) env = case lookup x env of
                         Nothing -> ValE "Variable not in scope"
                         Just v -> v
@@ -70,4 +79,6 @@ evaluate (App (Func x t e) e2) env = case (evaluate e2 env, t) of
                                         (ValB _, TypeI) -> ValE $ "Type mismatch for " ++ x
                                         (ValE s, _) -> ValE s
 evaluate _ env = ValE "undefined" -- Func or App e1 e2 where e1 is not a function
+
+
 
